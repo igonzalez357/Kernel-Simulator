@@ -6,6 +6,7 @@
 #include "timer.h"
 #include "loader.h"
 #include "scheduler.h"
+#include "physicalMemory.h"
 #include "estructuras.h"
 
 // Declaración de las variables globales
@@ -15,6 +16,7 @@ pthread_mutex_t process_queue_mutex;
 pthread_mutex_t scheduler_mutex;
 pthread_cond_t scheduler_cond;
 ProcessQueue queue; 
+unsigned char physicalMemory[16777216];
 
 int intervalTimer, politicaScheduler;
 

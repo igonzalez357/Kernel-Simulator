@@ -1,15 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "physicalMemory.h"
+//#include "estructuras.h"
 
-#define MEM_SIZE 16777216  // 16MB = 2^24 bytes
-#define WORD_SIZE 4       // 4 bytes por palabra
-
-unsigned char physicalMemory[MEM_SIZE];  // Memoria física de 16MB
-
+// Memoria física de 16MB * 4B = 64MB
+// Memoria para el kernel = 4MB * 4B = 16MB (0x000000 - 0x3FFFFF)
 // Función para inicializar la memoria física (ponemos todo a cero)
 void init_physical_memory() {
-    for (int i = 0; i < MEM_SIZE; i++) {
+    for (int i = 0; i < sizeof(physicalMemory); i++) {
         physicalMemory[i] = 0;  // Inicializamos todos los valores a 0
     }
     printf("Memoria física inicializada.\n");

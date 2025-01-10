@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <unistd.h>
 #include "loader.h"
-#include "estructuras.h"
+//#include "estructuras.h"
 
 
 // Función que carga un programa desde un archivo
@@ -90,22 +90,21 @@ void* loader_thread() {
     char filename[11];
     int numFile = 0;
     while (1) {
-        
-        sprintf(filename, "prog%03d.elf", numFile);
-        PCB *new_pcb = create_process(filename);
 
         // Agregar el proceso a la cola
         pthread_mutex_lock(&process_queue_mutex);
         if (queue.numProcesses < MAXPROCESSES) {
+
+            sprintf(filename, "prog%03d.elf", numFile);
+            PCB *new_pcb = create_process(filename);
             queue.processes[queue.numProcesses] = new_pcb;
             queue.numProcesses++;
+            numFile++;
+
         } else {
             printf("Loader: Cola de procesos llena");
-            free(new_pcb);
         }
         pthread_mutex_unlock(&process_queue_mutex);
-
-        numFile++;
 
     }
     return NULL;

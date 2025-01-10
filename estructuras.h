@@ -3,6 +3,8 @@
 // Máximo número de procesos permitidos en la cola
 #define MAXPROCESSES 20
 
+#define MEM_SIZE 16777216   // 16MB = 2^24 bytes
+#define WORD_SIZE 4         // 4 bytes por palabra
 
 struct MM {
     unsigned int *code;  // Puntero a la dirección virtual del segmento de código (.text)
@@ -29,13 +31,13 @@ typedef struct Machine {
 } Machine;
 
 // Estructura para los registros de cada hilo de CPU
-typedef struct CPU_thread {
+typedef struct HWThread {
     unsigned int PC;       // Contador de programa (program counter)
     unsigned int RI;       // Registro de instrucción (Instruction Register)
     unsigned int TLB[16];  // Tabla de traducción (TLB)
-    unsigned int PTBR;     // Puntero a la tabla de páginas (Page Table Base Register)
+    unsigned int *PTBR;    // Puntero a la tabla de páginas (Page Table Base Register)
     unsigned int MMU[256]; // Simulación de la MMU
-} CPU_thread;
+} HWThread;
 
 // Declaraciones para la sincronización entre hilos
 extern pthread_mutex_t timer_mutex;         // Mutex para el Timer
@@ -51,4 +53,4 @@ extern ProcessQueue queue;
 extern int intervalTimer, politicaScheduler;
 
 // Variable global de memoria física
-extern unsigned char physicalMemory[16777216];  // Memoria física de 16MB
+extern unsigned char physicalMemory[MEM_SIZE * WORD_SIZE];  // Memoria física de 16MB * 4B = 64MB
