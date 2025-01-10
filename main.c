@@ -16,7 +16,10 @@ pthread_mutex_t process_queue_mutex;
 pthread_mutex_t scheduler_mutex;
 pthread_cond_t scheduler_cond;
 ProcessQueue queue; 
-unsigned char physicalMemory[16777216];
+Machine machine;
+int numHilosTotales;
+int numHilosDisponibles;
+PhysicalMemory physicalMemory;
 
 int intervalTimer, politicaScheduler;
 
@@ -28,8 +31,25 @@ int main(int argc, char *argv[]){
         exit(1);
     }
 
+    printf("Ingrese el número de núcleos de la máquina (Recomendado 2): ");
+    if (scanf("%d", &machine.numCores) != 1) {
+        printf("Error: entrada inválida para el número de núcleos.\n");
+        exit(1);
+    }
+    
+    // Solicitar al usuario el número de hilos por núcleo de la máquina
+    printf("Ingrese el número de hilos por núcleo de la máquina (Recomendado 3): ");
+    if (scanf("%d", &machine.numHilos) != 1) {
+        printf("Error: entrada inválida para el número de hilos.\n");
+        exit(1);
+    }
+
+    numHilosTotales = machine.numCores * machine.numHilos;
+    numHilosDisponibles = numHilosTotales;
+    printf("Número total de hilos en la máquina: %d\n", numHilosTotales);
+
     // Solicitar al usuario la configuración de la simulación por consola
-    printf("Ingrese el intervalo de ticks del temporizador (Recomendado 100000): ");
+    printf("Ingrese el intervalo de ticks del temporizador (Recomendado 4): ");
     if (scanf("%d", &intervalTimer) != 1) {
         printf("Error: entrada inválida para el intervalo de ticks del temporizador.\n");
         exit(1);
@@ -71,6 +91,14 @@ int main(int argc, char *argv[]){
     }
     if (pthread_cond_init(&scheduler_cond, NULL) != 0) {
         perror("Error al inicializar scheduler_cond");
+        exit(1);
+    }
+    if (pthread_mutex_init(&clock_mutex, NULL) != 0) {
+        perror("Error al inicializar clock_mutex");
+        exit(1);
+    }
+    if (pthread_cond_init(&clock_cond, NULL) != 0) {
+        perror("Error al inicializar clock_cond");
         exit(1);
     }
     

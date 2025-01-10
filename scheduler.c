@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <time.h>  // Para usar clock_gettime()
 #include <unistd.h> // Para usar sleep()
+#include <string.h>
 
 int quantum = 5; // Quantum de tiempo para Round Robin
 
@@ -19,28 +20,60 @@ void remove_process_from_queue(int index) {
     }    
 }
 
-// Función para ejecutar el proceso y medir el tiempo de ejecución real
-void execute_process(int wait, int pid) {
-    
-    struct timespec start, end; // Estructuras para almacenar el tiempo
+void actualizarColaProcesos (){
 
-    clock_gettime(CLOCK_MONOTONIC, &start); // Tiempo de inicio
-    sleep(wait); // Simular la ejecución del proceso
-    clock_gettime(CLOCK_MONOTONIC, &end); // Tiempo de fin
+    for(int i = 0; i < queue.numProcesses && numHilosDisponibles < numHilosTotales; i++){
+        
+        // Decrementar el tiempo de vida de cada proceso si está en estado RUNNING
+        if(strcmp(queue.processes[i]->state, "RUNNING") == 0 || strcmp(queue.processes[i]->state, "STOPPED") == 0){
 
-    // Calcular el tiempo real en segundos
-    double elapsed_time = (end.tv_sec - start.tv_sec) + (end.tv_nsec - start.tv_nsec) / 1e9;
+            if (politicaScheduler == 2 && queue.processes[i]->quantum == 1){
 
-    // Mostrar el mensaje solo si el tiempo de espera es mayor a 0 (Es decir, si había procesos en la cola)
-    if (wait > 0 && politicaScheduler != 2) {
-        printf("Scheduler: Proceso con PID %d finalizado, tiempo total = %.6fs. Ocupación de la queue = (%d/%d)\n", pid, elapsed_time, queue.numProcesses, MAXPROCESSES);
+                queue.processes[i]->quantumTime--; // Decrementar el tiempo de ejecución con quantum
+
+                if(queue.processes[i]->quantumTime == 0){
+
+                    queue.processes[i]->quantum = 0; // Indica que el proceso ya no se ejecutará con quantum
+                    strcpy(queue.processes[i]->state, "STOPPED"); // Cambiar el estado del proceso a STOPPED
+                    printf("Proceso con PID %d interrumpido, tiempo restante = %d. Encolado al final de la queue\n", queue.processes[i]->pid, queue.processes[i]->lifetime);
+                
+                }
+
+                continue;
+            }
+            
+
+            queue.processes[i]->lifetime--;
+            if(queue.processes[i]->lifetime == 0){
+                printf("Proceso con PID %d finalizado. Ocupación de la queue = (%d/%d)\n", queue.processes[i]->pid, queue.numProcesses - 1, MAXPROCESSES);
+                remove_process_from_queue(i);
+                i--;
+                numHilosDisponibles++;
+            }
+
+        }
     }
+
 }
 
 // Función para ejecutar la política FCFS (First-Come, First-Served)
 void scheduler_fcfs() {
 
     while (1) {
+
+        for (int i = 0; i < intervalTimer - 1; i++) {
+            
+            // Esperar señal del clock para actualizar la cola de procesos
+            pthread_mutex_lock(&clock_mutex);
+            pthread_cond_wait(&clock_cond, &clock_mutex);
+
+            // Acceder a la cola de procesos y actualizarla
+            pthread_mutex_lock(&process_queue_mutex);
+            actualizarColaProcesos();
+            pthread_mutex_unlock(&process_queue_mutex);
+
+            pthread_mutex_unlock(&clock_mutex);
+        }
 
         // Esperar señal del Timer para activarse
         pthread_mutex_lock(&scheduler_mutex);
@@ -49,26 +82,30 @@ void scheduler_fcfs() {
 
         // Acceder a la cola de procesos
         pthread_mutex_lock(&process_queue_mutex);
-        printf("Scheduler: (Activado por Timer) ");
+        printf("Scheduler: (Activado por Timer) \n");
 
-        if (queue.numProcesses > 0) { // Si hay procesos en la cola
+        if (queue.numProcesses > 0 && numHilosDisponibles > 0) { // Si hay procesos en la cola y no todos los hilos están ocupados
 
-            // Obtener la información del primer proceso en la cola
-            int wait = queue.processes[0]->lifetime;
-            int pid = queue.processes[0]->pid;
-            printf("Proceso en ejecución (PID %d), tiempo de ejecución = %ds\n", pid, wait);
+            for (int i = 0; numHilosDisponibles > 0 && i < queue.numProcesses; i++) {
 
-            // Eliminar el proceso de la cola
-            remove_process_from_queue(0);
-            pthread_mutex_unlock(&process_queue_mutex);
+                // Obtener la información del primer proceso en la cola en estado READY
+                if(strcmp(queue.processes[i]->state, "READY") == 0){
+                    strcpy(queue.processes[i]->state, "RUNNING"); // Cambiar el estado del proceso a RUNNING
+                    numHilosDisponibles--;
+                    printf("Proceso con PID %d en ejecución. Tiempo estimado = %d s\n", queue.processes[i]->pid, queue.processes[i]->lifetime);
+                }
+                pthread_mutex_unlock(&process_queue_mutex);
 
-            // Ejecutar el proceso y medir el tiempo
-            execute_process(wait, pid);
+            }
 
         } else {
 
             // Si no hay procesos en la cola
-            printf("No hay procesos en la cola\n");
+            if (queue.numProcesses == 0) {
+                printf("No hay procesos en la cola\n");
+            } else if (numHilosDisponibles == 0) {
+                printf("Todos los hilos están ocupados\n");
+            }
             pthread_mutex_unlock(&process_queue_mutex);
         }
     }
@@ -79,6 +116,20 @@ void scheduler_sjf() {
 
     while (1) {
     
+        for (int i = 0; i < intervalTimer - 1; i++) {
+            
+            // Esperar señal del clock para actualizar la cola de procesos
+            pthread_mutex_lock(&clock_mutex);
+            pthread_cond_wait(&clock_cond, &clock_mutex);
+
+            // Acceder a la cola de procesos y actualizarla
+            pthread_mutex_lock(&process_queue_mutex);
+            actualizarColaProcesos();
+            pthread_mutex_unlock(&process_queue_mutex);
+
+            pthread_mutex_unlock(&clock_mutex);
+        }
+
         // Esperar señal del Timer para activarse
         pthread_mutex_lock(&scheduler_mutex);
         pthread_cond_wait(&scheduler_cond, &scheduler_mutex);
@@ -86,34 +137,39 @@ void scheduler_sjf() {
 
         // Acceder a la cola de procesos
         pthread_mutex_lock(&process_queue_mutex);
-        printf("Scheduler: (Activado por Timer) ");
+        printf("Scheduler: (Activado por Timer) \n");
 
-        if (queue.numProcesses > 0) {
+        if (queue.numProcesses > 0 && numHilosDisponibles > 0) { // Si hay procesos en la cola y no todos los hilos están ocupados
 
-            // Encontrar el proceso con el menor tiempo de ejecución
-            int menor = 0;
-            for (int i = 1; i < queue.numProcesses; i++) {
-                if (queue.processes[i]->lifetime < queue.processes[menor]->lifetime) {
-                    menor = i; // Actualizar índice del proceso más corto
+            for (int i = 0; numHilosDisponibles > 0 && i < queue.numProcesses; i++) {
+
+                // Encontrar el proceso con el menor tiempo de ejecución en estado READY
+                if(strcmp(queue.processes[i]->state, "READY") == 0){
+                    int menor = i;
+                    for (int j = 0; j < queue.numProcesses; j++) {
+                        if (queue.processes[j]->lifetime < queue.processes[menor]->lifetime && strcmp(queue.processes[j]->state, "READY") == 0) {
+                            menor = j; // Actualizar índice del proceso más corto
+                        }
+                    }
+
+                    // Poner el proceso en estado RUNNING
+                    strcpy(queue.processes[menor]->state, "RUNNING");
+                    numHilosDisponibles--;
+                    printf("Proceso con PID %d en ejecución. Tiempo estimado = %d s\n", queue.processes[menor]->pid, queue.processes[menor]->lifetime);
                 }
             }
 
-            // Obtener el proceso seleccionado
-            int wait = queue.processes[menor]->lifetime;
-            int pid = queue.processes[menor]->pid;
-            printf("Proceso en ejecución (PID %d), tiempo de ejecución = %ds\n", pid, wait);
-
-            // Eliminar el proceso seleccionado de la cola
-            remove_process_from_queue(menor);
             pthread_mutex_unlock(&process_queue_mutex);
-
-            // Ejecutar el proceso y medir el tiempo
-            execute_process(wait, pid);
 
         } else {
 
-            // Si no hay procesos en la cola
-            printf("No hay procesos en la cola\n");
+            // Si no hay procesos en la cola o todos los hilos están ocupados
+            if (queue.numProcesses == 0) {
+                printf("No hay procesos en la cola\n");
+            } else if (numHilosDisponibles == 0) {
+                printf("Todos los hilos están ocupados\n");
+            }
+
             pthread_mutex_unlock(&process_queue_mutex);
         }
     }
@@ -125,6 +181,20 @@ void scheduler_rr(int quantum) {
 
     while (1) {
 
+        for (int i = 0; i < intervalTimer - 1; i++) {
+            
+            // Esperar señal del clock para actualizar la cola de procesos
+            pthread_mutex_lock(&clock_mutex);
+            pthread_cond_wait(&clock_cond, &clock_mutex);
+
+            // Acceder a la cola de procesos y actualizarla
+            pthread_mutex_lock(&process_queue_mutex);
+            actualizarColaProcesos();
+            pthread_mutex_unlock(&process_queue_mutex);
+
+            pthread_mutex_unlock(&clock_mutex);
+        }
+
         // Esperar señal del Timer para activarse
         pthread_mutex_lock(&scheduler_mutex);
         pthread_cond_wait(&scheduler_cond, &scheduler_mutex);
@@ -132,46 +202,58 @@ void scheduler_rr(int quantum) {
 
         // Acceder a la cola de procesos
         pthread_mutex_lock(&process_queue_mutex);
-        printf("Scheduler: (Activado por Timer) ");
+        printf("Scheduler: (Activado por Timer) \n");
 
-        if (queue.numProcesses > 0) {
+        if (queue.numProcesses > 0 && numHilosDisponibles > 0) { // Si hay procesos en la cola y no todos los hilos están ocupados
 
-            // Tomar el primer proceso en la cola
-            PCB* current_process = queue.processes[0];
-            int pid = current_process->pid;
-            int time_remaining = current_process->lifetime;
+            for (int i = 0; numHilosDisponibles > 0 && i < queue.numProcesses; i++) {
 
-            // Eliminar el proceso de la cola temporalmente
-            remove_process_from_queue(0);
+                if (strcmp(queue.processes[i]->state, "READY") == 0 || strcmp(queue.processes[i]->state, "STOPPED") == 0) {
 
-            // Decidir cuánto tiempo ejecutará el proceso (mínimo entre quantum y tiempo restante)
-            int execution_time = (time_remaining > quantum) ? quantum : time_remaining;
-            printf("Proceso con PID %d, ejecutando por %d segundos de %d restantes\n", pid, execution_time, time_remaining);
+                    // Tomar el primer proceso en la cola
+                    PCB* current_process = queue.processes[i];
+                    int pid = current_process->pid;
+                    int time_remaining = current_process->lifetime;
+                    strcpy(current_process->state, "RUNNING");
+                    numHilosDisponibles--;
 
-            // Si el proceso no ha terminado, actualizar su tiempo restante y encolarlo de nuevo
-            if (time_remaining > quantum) {
-                current_process->lifetime = time_remaining - quantum;
-                queue.processes[queue.numProcesses] = current_process;
-                queue.numProcesses++;
+                    // Eliminar el proceso de la cola temporalmente
+                    remove_process_from_queue(i);
+                    i--;
 
-            } else {
-                // Si el proceso ha terminado
-                free(current_process); // Liberar memoria del proceso
+                    // Decidir cuánto tiempo ejecutará el proceso (mínimo entre quantum y tiempo restante)
+                    int execution_time = (time_remaining > quantum) ? quantum : time_remaining;
+                    printf("Proceso con PID %d, ejecutando por %d segundos de %d restantes. ", pid, execution_time, time_remaining);
+
+                    // Si el proceso no ha terminado, actualizar su tiempo restante y encolarlo de nuevo
+                    if (time_remaining > quantum) {
+                        current_process->quantum = 1; // Indica que el proceso se ejecutará el quantum de tiempo 
+                        current_process->quantumTime = quantum; // Establece el tiempo de ejecución con quantum
+                        current_process->lifetime = time_remaining - quantum;
+                        queue.processes[queue.numProcesses] = current_process;
+                        queue.numProcesses++;
+
+                    } 
+                    else {
+                        printf("Extrayendo de la cola. Ocupación de la queue = (%d/%d)", queue.numProcesses, MAXPROCESSES);
+                    }
+
+                    printf("\n");
+                }
             }
 
             pthread_mutex_unlock(&process_queue_mutex);
+        }
+        else {
 
-            execute_process(execution_time, pid); // Ejecutar el proceso y medir el tiempo
-            if (time_remaining <= quantum) printf("Scheduler: Proceso con PID %d finalizado. Ocupación de la queue = (%d/%d)\n", pid, queue.numProcesses, MAXPROCESSES);
-            else printf("Scheduler: Proceso con PID %d interrumpido, tiempo restante = %d\n", pid, current_process->lifetime);
-
-        } else {
-
-            // Si no hay procesos en la cola
-            printf("No hay procesos en la cola\n");
+            // Si no hay procesos en la cola o todos los hilos están ocupados
+            if (queue.numProcesses == 0) {
+                printf("No hay procesos en la cola\n");
+            } else if (numHilosDisponibles == 0) {
+                printf("Todos los hilos están ocupados\n");
+            }
             pthread_mutex_unlock(&process_queue_mutex);
         }
-
     }
 }
 
@@ -193,9 +275,9 @@ void* scheduler_thread() {
             break;
 
         default:
-            // Política no reconocida, auqnue no debería llegar aquí
+            // Política no reconocida
             printf("Política no reconocida, error\n");
-            exit(1);
+            exit(EXIT_FAILURE);
             break;
     }
 

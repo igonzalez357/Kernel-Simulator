@@ -1,9 +1,11 @@
 #include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <pthread.h>
 #include <unistd.h>
 #include "loader.h"
-//#include "estructuras.h"
+#include "physicalMemory.h"
+#include "estructuras.h"
 
 
 // Función que carga un programa desde un archivo
@@ -14,21 +16,27 @@ void load_program_from_file(char *filename, PCB *pcb) {
         return;
     }
 
-    unsigned int code_start, data_start;
-    fscanf(file, "%x %x\n", &code_start, &data_start);  // Leer las direcciones de inicio de código y datos
+    unsigned long code_start, data_start;
+    
+    // Leer y descartar la etiqueta .text, luego leer la dirección
+    fscanf(file, "%*s %lx\n", &code_start);
+
+    // Leer y descartar la etiqueta .data, luego leer la dirección
+    fscanf(file, "%*s %lx\n", &data_start);
+
+    // Calcular el número de páginas necesarias para el programa
+    int paginasTotales = (code_start + data_start) / 256;
+
+    // Calcular marcos libres
+    int *marcosLibres = malloc(paginasTotales * sizeof(int));
+
+    buscarMarcos(marcosLibres, paginasTotales); // Buscar marcos libres
 
     // Asignar las direcciones virtuales de los segmentos al PCB
-    pcb->mm->code = (unsigned int *)code_start;
-    pcb->mm->data = (unsigned int *)data_start;
-
-    // Crear la tabla de páginas (Page Table) y asignarla al PCB
-    pcb->mm->pgb = (unsigned int *)malloc(sizeof(PageTable));
-    if (pcb->mm->pgb == NULL) {
-        perror("Error al asignar memoria para la tabla de páginas");
-        fclose(file);
-        return;
-    }
-    memset(pcb->mm->pgb, 0, sizeof(PageTable));  // Inicializar la tabla de páginas a 0
+    pcb->mm.code = (uintptr_t *)code_start;
+    pcb->mm.data = (uintptr_t *)data_start;
+    pcb->mm.pgb = physicalMemory.siguienteTabla;
+    nuevaTabla(paginasTotales, pcb->mm->marcosLibres);
 
     // Leer y cargar el código (.text) en la memoria física
     unsigned int code_line;
@@ -60,7 +68,7 @@ void load_program_from_file(char *filename, PCB *pcb) {
 }
 
 // Función para crear el PCB y cargar el programa
-PCB* create_process(char *filename) {
+PCB* create_process(char *filename, int PID) {
     PCB *new_pcb = (PCB *)malloc(sizeof(PCB));
     if (new_pcb == NULL) {
         perror("Error al crear PCB");
@@ -76,7 +84,7 @@ PCB* create_process(char *filename) {
     }
 
     // Inicializar el PCB
-    new_pcb->pid = rand();  // Asignar un pid aleatorio (o puedes generar uno secuencialmente)
+    new_pcb->pid = PID;  // Asignar un pid aleatorio (o puedes generar uno secuencialmente)
 
     // Cargar el programa en la memoria
     load_program_from_file(filename, new_pcb);
@@ -89,17 +97,19 @@ void* loader_thread() {
 
     char filename[11];
     int numFile = 0;
+    int PID = 0;
     while (1) {
 
         // Agregar el proceso a la cola
         pthread_mutex_lock(&process_queue_mutex);
         if (queue.numProcesses < MAXPROCESSES) {
 
-            sprintf(filename, "prog%03d.elf", numFile);
-            PCB *new_pcb = create_process(filename);
+            sprintf(filename, "procesos/prog%03d.elf", numFile);
+            PCB *new_pcb = create_process(filename, PID);
             queue.processes[queue.numProcesses] = new_pcb;
             queue.numProcesses++;
             numFile++;
+            PID++;
 
         } else {
             printf("Loader: Cola de procesos llena");
